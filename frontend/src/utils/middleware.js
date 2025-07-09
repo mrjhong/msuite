@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const urlApi = process.env.REACT_APP_API_URL;
+const urlApi = process.env.REACT_APP_URL_API;
 
 export const middlewareRequest = async (method, url, data = null) => {
   const token = localStorage.getItem('token');

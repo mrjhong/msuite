@@ -2,11 +2,12 @@ import React, { useState, useEffect ,useCallback} from 'react';
 import ContactList from './ContactList';
 import { apiCancelScheduledMessage, apiGetScheduledMessages, apiScheduleMessage } from '../../services/whatsappApiService';
 import { useGlobalContext } from '../../context/GlobalContext';
+import DatePicker from 'react-datepicker';
 
 const ScheduleMessage = () => {
   const { selectedContacts, selectedGroups ,showNotification} = useGlobalContext();
   const [message, setMessage] = useState('');
-  const [scheduledTime, setScheduledTime] = useState('');
+  const [scheduledTime, setScheduledTime] = useState(new Date());
   const [repeat, setRepeat] = useState('none');
   const [customDays, setCustomDays] = useState(1);
   const [scheduledMessages, setScheduledMessages] = useState([]);
@@ -109,14 +110,29 @@ const ScheduleMessage = () => {
             <div className="mb-4 space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium text-gray-700">Fecha y Hora:</label>
-                <input
-                  type="datetime-local"
-                  value={scheduledTime}
-                  onChange={(e) => setScheduledTime(e.target.value)}
-                  className="p-2 text-sm border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  required
-                />
+           
+
+
+
+                  <DatePicker
+                    selected={scheduledTime}
+                    onChange={(date) => setScheduledTime(date)}
+                    showTimeSelect
+                    timeFormat="HH:mm"
+                    timeIntervals={15}
+                    dateFormat="MMMM d, yyyy h:mm aa"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    popperClassName="z-50" // Importante para el dropdown
+                    popperPlacement="auto"
+                    minDate={new Date()}
+                    required
+                    locale="es" // Si necesitas español
+                    timeCaption="Hora"
+                  />
               </div>
+
+            
+
 
               <div className="border-t pt-3">
                 <div className="flex items-center justify-between mb-2">
