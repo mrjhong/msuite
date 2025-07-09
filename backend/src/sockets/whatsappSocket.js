@@ -1,32 +1,30 @@
 import { Server } from 'socket.io';
-import { whatsappManager } from '../services/whatsappManager.js';
+import whatsappManager from '../services/whatsappManager.js';
 import jwt from 'jsonwebtoken';
 import config from '../../config.js';
 import { initializeActionListeners } from '../utils/actionListeners.js';
-//import qrcode from 'qrcode-terminal';
-// Mapa para almacenar clientes conectados
-const connectedClients = new Map();
 
-export const initializeSocket = (server, whatsappClient) => {
+// Mapa para almacenar sockets conectados
+const connectedSockets = new Map();
+
+export const initializeSocket = (server) => {
   const io = new Server(server, {
     cors: {
       origin: process.env.CORS_ORIGIN || '*',
       methods: ['GET', 'POST']
     },
     connectionStateRecovery: {
-      maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutos
+      maxDisconnectionDuration: 2 * 60 * 1000,
       skipMiddlewares: false
     }
   });
 
-  //middleware para verificar la autenticación
-
+  // Middleware de autenticación
   io.use((socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) {
-      console.log('No token provided');
-      return next(new Error('NO_TOKEN_PROVIDED')); // Envía un error específico
-      
+      console.log('❌ No token provided');
+      return next(new Error('NO_TOKEN_PROVIDED'));
     }
   
     try {
@@ -34,131 +32,148 @@ export const initializeSocket = (server, whatsappClient) => {
       socket.user = payload;
       next();
     } catch (err) {
-      return next(new Error('INVALID_TOKEN')); // Envía un error específico
+      console.log('❌ Invalid token');
+      return next(new Error('INVALID_TOKEN'));
     }
   });
 
+  // Configurar listeners de WhatsApp una sola vez
+  setupWhatsAppGlobalListeners();
 
-  // Eventos de conexión
   io.on('connection', (socket) => {
-    console.log('Cliente conectado:', socket.id);
-    connectedClients.set(socket.id, { socket });
+    console.log(`✅ Socket conectado: ${socket.id} (Usuario: ${socket.user.userId})`);
+    connectedSockets.set(socket.id, { socket, user: socket.user });
 
     // Manejar inicialización de WhatsApp
     socket.on('initializeWhatsApp', async (userId) => {
       try {
-        console.log(`*************Inicializando WhatsApp para el usuario:, ${userId}
-          ********************************************
-          ********************************************
-          ********************************************`);
-          
-        connectedClients.set(socket.id, { ...connectedClients.get(socket.id), userId });
-
-        // Configurar listeners de WhatsApp
-        setupWhatsAppListeners(socket, whatsappClient);
-
+        console.log(`🚀 Inicializando WhatsApp para usuario: ${userId}`);
+        
+        // Usar el cliente único
+        const client = await whatsappManager.initializeClient();
+        
         // Verificar estado actual
-        const state = await whatsappClient.getState();
-        if (state) {
+        if (whatsappManager.isClientReady()) {
           socket.emit('ready');
+        } else {
+          const state = await whatsappManager.getState();
+          if (state === 'CONNECTED') {
+            socket.emit('ready');
+          }
         }
       } catch (error) {
-        console.error('Error en initializeWhatsApp:', error);
+        console.error('❌ Error en initializeWhatsApp:', error);
         socket.emit('error', { message: 'Error al inicializar WhatsApp' });
       }
     });
 
-
+    // Manejar envío de mensajes
     socket.on('message_sent', async ({ chatId, message }) => {
       try {
-        const client = whatsappManager.getClient('cliente_one');
-        if (!client) {
+        if (!whatsappManager.isClientReady()) {
           throw new Error('Cliente de WhatsApp no inicializado');
         }
 
-        const messagesend = await client.sendMessage(chatId, message);
-        // mostrar por consola el objeto messagesend
-        const bodyMessage = {
-          id: messagesend.id._serialized,
-          senderId: messagesend.from,
-          content: messagesend.body,
-          createdAt: messagesend.timestamp * 1000,
-        }
-        socket.emit('message_received', bodyMessage);
+        const sentMessage = await whatsappManager.sendMessage(chatId, message);
+        
+        const messageData = {
+          id: sentMessage.id._serialized,
+          senderId: sentMessage.from,
+          content: sentMessage.body,
+          createdAt: sentMessage.timestamp * 1000,
+        };
+        
+        socket.emit('message_received', messageData);
       } catch (error) {
-        console.error('Error al enviar mensaje:', error);
-        socket.emit('error', { message: 'Error enviando mensaje' });
+        console.error('❌ Error al enviar mensaje:', error);
+        socket.emit('error', { message: 'Error enviando mensaje: ' + error.message });
       }
-    }
-    );
+    });
 
     // Manejar desconexión
     socket.on('disconnect', () => {
-      console.log('Cliente desconectado:', socket.id);
-      connectedClients.delete(socket.id);
+      console.log(`❌ Socket desconectado: ${socket.id}`);
+      connectedSockets.delete(socket.id);
     });
 
-    // Manejar errores
     socket.on('error', (error) => {
-      console.error('Error en socket:', error);
+      console.error(`❌ Error en socket ${socket.id}:`, error);
     });
-
-
-    whatsappClient.on('message', async (message) => {
-      try {
-        const msg = message;
-        const bodyMessage = {
-          id: msg.id._serialized,
-          senderId: msg.from,
-          content: msg.body,
-          createdAt: msg.timestamp * 1000,
-        }
-        socket.emit('message_received', bodyMessage);
-      } catch (error) {
-        console.log('Error al recibir mensaje:', error);
-      }
-    }
-    );
   });
 
   return io;
 };
 
-// Configurar listeners de WhatsApp para el socket
-const setupWhatsAppListeners = (socket, whatsappClient) => {
-  //client.on('qr', qr => qrcode.generate(qr, { small: true }));
-  const qrListener = (qr) => {
-    console.log('QR recibido');
-    socket.emit('qr', qr);
-  };
+// Configurar listeners globales de WhatsApp (una sola vez)
+const setupWhatsAppGlobalListeners = () => {
+  // QR Code
+  whatsappManager.addListener('qr', 'socket_qr', (qr) => {
+    console.log('📱 QR Code generado, enviando a todos los sockets');
+    broadcastToAllSockets('qr', qr);
+  });
 
-  const readyListener = () => {
-    console.log('WhatsApp listo');
-    initializeActionListeners(whatsappClient)
-    socket.emit('ready');
-  };
+  // Cliente listo
+  whatsappManager.addListener('ready', 'socket_ready', () => {
+    console.log('✅ WhatsApp listo, notificando a todos los sockets');
+    broadcastToAllSockets('ready');
+    
+    // Inicializar listeners de acciones
+    const client = whatsappManager.getClient();
+    if (client) {
+      initializeActionListeners(client);
+    }
+  });
 
-  const authFailureListener = (error) => {
-    console.error(' *Error de autenticación : ', error);
-    socket.emit('auth_error', { error: error.message });
-  };
+  // Error de autenticación
+  whatsappManager.addListener('auth_failure', 'socket_auth_error', (error) => {
+    console.error('❌ Error de autenticación WhatsApp:', error);
+    broadcastToAllSockets('auth_error', { error: error.message });
+  });
 
-  const disconnectedListener = (reason) => {
-    console.log('WhatsApp desconectado:', reason);
-    socket.emit('disconnected', { reason });
-  };
+  // Desconexión
+  whatsappManager.addListener('disconnected', 'socket_disconnected', (reason) => {
+    console.log('📱 WhatsApp desconectado:', reason);
+    broadcastToAllSockets('disconnected', { reason });
+  });
 
-  // Agregar listeners
-  whatsappClient.on('qr', qrListener);
-  whatsappClient.on('ready', readyListener);
-  whatsappClient.on('auth_failure', authFailureListener);
-  whatsappClient.on('disconnected', disconnectedListener);
+  // Mensajes entrantes
+  whatsappManager.addListener('message', 'socket_message', (message) => {
+    try {
+      const messageData = {
+        id: message.id._serialized,
+        senderId: message.from,
+        content: message.body,
+        createdAt: message.timestamp * 1000,
+      };
+      
+      broadcastToAllSockets('message_received', messageData);
+    } catch (error) {
+      console.error('❌ Error procesando mensaje entrante:', error);
+    }
+  });
+};
 
-  // Limpiar listeners cuando el socket se desconecta
-  socket.on('disconnect', () => {
-    whatsappClient.off('qr', qrListener);
-    whatsappClient.off('ready', readyListener);
-    whatsappClient.off('auth_failure', authFailureListener);
-    whatsappClient.off('disconnected', disconnectedListener);
+// Función para enviar mensajes a todos los sockets conectados
+const broadcastToAllSockets = (event, data = null) => {
+  connectedSockets.forEach(({ socket }) => {
+    try {
+      socket.emit(event, data);
+    } catch (error) {
+      console.error(`❌ Error enviando ${event} a socket ${socket.id}:`, error);
+    }
+  });
+};
+
+// Función para obtener sockets conectados (útil para debugging)
+export const getConnectedSocketsCount = () => {
+  return connectedSockets.size;
+};
+
+// Función para enviar mensaje a un usuario específico
+export const sendToUser = (userId, event, data) => {
+  connectedSockets.forEach(({ socket, user }) => {
+    if (user.userId === userId) {
+      socket.emit(event, data);
+    }
   });
 };

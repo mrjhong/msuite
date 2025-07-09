@@ -1,48 +1,55 @@
-
-
+// backend/src/services/whatsappService.js
 import ScheduledMessage from '../models/ScheduledMessage.js';
 import ScheduledAction from '../models/ScheduledAction.js';
 import { cancelJob } from '../utils/jobs/scheduleWhatsapp.js';
 import { removeActionListener } from '../utils/actionListeners.js';
-import { whatsappManager } from './whatsappManager.js';
+import whatsappManager from './whatsappManager.js';
 
-
-
-
-const userClients = new Map(); // Almacena las instancias de WhatsApp por usuario
-
-export const initializeWhatsAppClient = () => {
-  return whatsappManager.initializeClient("cliente_one");
+// Inicializar el cliente único
+export const initializeWhatsAppClient = async () => {
+  try {
+    console.log('🚀 Inicializando cliente WhatsApp único...');
+    const client = await whatsappManager.initializeClient();
+    return client;
+  } catch (error) {
+    console.error('❌ Error inicializando WhatsApp:', error);
+    throw error;
+  }
 };
 
-export const getClientByUserId = (userId) => {
-  return userClients.get(userId) || null;
+// Obtener el cliente (ya no necesitamos userId)
+export const getWhatsAppClient = () => {
+  return whatsappManager.getClient();
 };
 
+// Verificar si el cliente está listo
+export const isWhatsAppReady = () => {
+  return whatsappManager.isClientReady();
+};
 
 export const sendMessageService = async (userId, chatId, message) => {
-  const client = whatsappManager.getClient("cliente_one");
-  if (!client) {
-    throw new Error('WhatsApp client not initialized for this user');
-  }
-
   try {
+    if (!whatsappManager.isClientReady()) {
+      throw new Error('WhatsApp client not ready');
+    }
 
-    await client.sendMessage(chatId, message);
-    console.log(`Mensaje enviado a ${chatId}: ${message}`);
+    await whatsappManager.sendMessage(chatId, message);
+    console.log(`✅ Mensaje enviado a ${chatId}: ${message}`);
   } catch (error) {
-    console.error(`Error al enviar mensaje a ${chatId}:`, error);
-    throw new Error('Error enviando mensaje');
+    console.error(`❌ Error al enviar mensaje a ${chatId}:`, error);
+    throw new Error('Error enviando mensaje: ' + error.message);
   }
 };
 
-// Service
 export const scheduleMessageService = async (userId, contacts, groups, message, scheduledTime, repeat = 'none', customDays = null) => {
-  const client = whatsappManager.getClient("cliente_one");
-  if (!client) throw new Error('WhatsApp client not initialized for this user');
+  if (!whatsappManager.isClientReady()) {
+    throw new Error('WhatsApp client not ready');
+  }
 
   const scheduledDate = new Date(scheduledTime);
-  if (scheduledDate < new Date()) throw new Error('La fecha programada debe ser en el futuro');
+  if (scheduledDate < new Date()) {
+    throw new Error('La fecha programada debe ser en el futuro');
+  }
 
   // Crear en base de datos
   const scheduledMessage = await ScheduledMessage.create({
@@ -62,14 +69,22 @@ export const scheduleMessageService = async (userId, contacts, groups, message, 
     
     const timeout = setTimeout(async () => {
       try {
+        // Verificar que el cliente siga listo
+        if (!whatsappManager.isClientReady()) {
+          console.warn('⚠️ Cliente no listo, reintentando en 30 segundos...');
+          setTimeout(() => scheduleJob(executionTime + 30000), 30000);
+          return;
+        }
+
         // Enviar mensajes
-        await Promise.all([
-          ...contacts.map(contact => sendMessageService(userId, contact, message)),
-          ...groups.map(group => sendMessageService(userId, group, message))
-        ]);
+        const allChats = [...contacts, ...groups];
+        await Promise.allSettled(
+          allChats.map(chatId => sendMessageService(userId, chatId, message))
+        );
         
         // Actualizar estado
         await scheduledMessage.update({ status: 'sent' });
+        console.log(`✅ Mensaje programado enviado: ${scheduledMessage.id}`);
         
         // Programar siguiente ejecución si es recurrente
         if (repeat !== 'none') {
@@ -78,7 +93,7 @@ export const scheduleMessageService = async (userId, contacts, groups, message, 
         }
       } catch (error) {
         await scheduledMessage.update({ status: 'error' });
-        console.error('Error enviando mensaje programado:', error);
+        console.error('❌ Error enviando mensaje programado:', error);
       }
     }, delay);
 
@@ -87,22 +102,19 @@ export const scheduleMessageService = async (userId, contacts, groups, message, 
 
   // Iniciar el ciclo de programación
   await scheduleJob(scheduledDate.getTime());
-
   return scheduledMessage;
 };
 
-// Nueva función para obtener mensajes programados
 export const getScheduledMessagesService = async (userId) => {
   return await ScheduledMessage.findAll({
     where: { 
       userId,
-      status: 'pending' // Solo mostramos los pendientes
+      status: 'pending'
     },
-    order: [['scheduledTime', 'ASC']] // Ordenamos por fecha más cercana
+    order: [['scheduledTime', 'ASC']]
   });
 };
 
-// Función para cancelar mensaje programado
 export const cancelScheduledMessageService = async (userId, messageId) => {
   const message = await ScheduledMessage.findOne({
     where: {
@@ -115,64 +127,55 @@ export const cancelScheduledMessageService = async (userId, messageId) => {
     throw new Error('Mensaje no encontrado');
   }
 
-  // Cancelar el job programado
   cancelJob(messageId);
-
-  // Actualizar estado en la base de datos
   await message.update({ status: 'cancelled' });
-
   return message;
 };
 
-
-
-
-
 export const addScheduledActionService = async (trigger, contacts, groups, message) => {
-  const client = whatsappManager.getClient("cliente_one");
-  if (!client) {
-    throw new Error('WhatsApp client not initialized for this user');
+  if (!whatsappManager.isClientReady()) {
+    throw new Error('WhatsApp client not ready');
   }
-  const action = await ScheduledAction.create(
-    { trigger, contacts, groups, message });
+  
+  const action = await ScheduledAction.create({
+    trigger, 
+    contacts, 
+    groups, 
+    message 
+  });
+  
   return action;
 };
 
-
 export const getScheduledActionsService = async (userId) => {
   return await ScheduledAction.findAll({
-      order: [['createdAt', 'DESC']]
+    where: { isActive: true },
+    order: [['createdAt', 'DESC']]
   });
 };
 
-export const cancelScheduledActionService = async ( actionId) => {
+export const cancelScheduledActionService = async (actionId) => {
   const action = await ScheduledAction.findOne({
-      where: { id: actionId }
+    where: { id: actionId }
   });
   
   if (!action) {
-      throw new Error('Acción no encontrada');
+    throw new Error('Acción no encontrada');
   }
   
-  // Eliminar listener si es necesario
   await removeActionListener(actionId);
-  
   await action.destroy();
   return action;
 };
 
-
-
-
-
 export const getContactsAndGroups = async (userId) => {
-  const client = whatsappManager.getClient("cliente_one");
-  if (!client) {
-    throw new Error('WhatsApp client not initialized for this user');
+  if (!whatsappManager.isClientReady()) {
+    throw new Error('WhatsApp client not ready');
   }
 
   try {
-    const chats = await client.getChats();
+    const chats = await whatsappManager.getChats();
+    
     return {
       contacts: chats
         .filter((chat) => chat.id.server.includes('c.us'))
@@ -189,12 +192,12 @@ export const getContactsAndGroups = async (userId) => {
         })),
     };
   } catch (error) {
-    console.error(`Error al obtener contactos y grupos:`, error);
-    throw new Error('Error al obtener contactos y grupos');
+    console.error(`❌ Error al obtener contactos y grupos:`, error);
+    throw new Error('Error al obtener contactos y grupos: ' + error.message);
   }
 };
 
-// Helpers
+// Helper para calcular próxima ejecución
 const getNextExecution = (lastExecution, repeat, customDays) => {
   const date = new Date(lastExecution);
   
