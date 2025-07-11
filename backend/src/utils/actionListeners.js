@@ -4,7 +4,7 @@ import whatsappManager from '../services/whatsappManager.js';
 
 // Cache para almacenar acciones y evitar consultas repetidas a la DB
 const actionCache = new Map();
-const CACHE_TTL = 30000; // 30 segundos
+const CACHE_TTL = 40000; // 30 segundos
 
 // Variables para gestión de listeners
 let listenersInitialized = false;
@@ -13,7 +13,7 @@ const dailyMessages = {}; // Objeto para rastrear mensajes por día
 // Limpiar caché periódicamente
 setInterval(() => {
     actionCache.clear();
-    console.log('🧹 Cache de acciones limpiado');
+    //console.log('🧹 Cache de acciones limpiado');
 }, CACHE_TTL);
 
 // Configurar listeners usando el manager optimizado
