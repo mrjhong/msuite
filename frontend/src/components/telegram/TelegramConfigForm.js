@@ -1,3 +1,4 @@
+// frontend/src/components/telegram/TelegramConfigForm.js
 import React, { useState, useEffect } from 'react';
 import { 
   FiSave, 
@@ -7,10 +8,18 @@ import {
   FiPlus,
   FiEdit3,
   FiTrash2,
-  FiSettings
+  FiSettings,
+  FiAlertCircle
 } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGlobalContext } from '../../context/GlobalContext';
+import { 
+  apiCreateTelegramConfig,
+  apiGetTelegramConfigs,
+  apiUpdateTelegramConfig,
+  apiDeleteTelegramConfig,
+  apiTestTelegramConfig
+} from '../../services/telegramApiService';
 
 const TelegramConfigForm = () => {
   const [configs, setConfigs] = useState([]);
@@ -18,6 +27,7 @@ const TelegramConfigForm = () => {
   const [editingConfig, setEditingConfig] = useState(null);
   const [loading, setLoading] = useState(false);
   const [testLoading, setTestLoading] = useState(null);
+  const [fetchLoading, setFetchLoading] = useState(true);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -41,59 +51,76 @@ const TelegramConfigForm = () => {
 
   const fetchConfigs = async () => {
     try {
-      setLoading(true);
-      // Simulación de API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      setFetchLoading(true);
+      const response = await apiGetTelegramConfigs();
       
-      // Mock data
-      setConfigs([
-        {
-          id: 1,
-          name: 'Bot Principal',
-          botUsername: '@mi_bot_principal',
-          description: 'Bot principal para comunicaciones',
-          isDefault: true,
-          isActive: true,
-          createdAt: new Date().toISOString()
-        }
-      ]);
+      if (response.success) {
+        setConfigs(response.data);
+      } else {
+        showNotification('Error al cargar configuraciones', 'error');
+      }
     } catch (error) {
+      console.error('Error fetching configs:', error);
       showNotification('Error al cargar configuraciones', 'error');
     } finally {
-      setLoading(false);
+      setFetchLoading(false);
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Validaciones
+    if (!formData.name.trim()) {
+      showNotification('El nombre es obligatorio', 'warning');
+      return;
+    }
+
+    if (!formData.botToken.trim()) {
+      showNotification('El token del bot es obligatorio', 'warning');
+      return;
+    }
+
+    // Validar formato del token
+    const tokenRegex = /^\d+:[A-Za-z0-9_-]+$/;
+    if (!tokenRegex.test(formData.botToken.trim())) {
+      showNotification('Formato de token inválido. Debe ser: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz', 'error');
+      return;
+    }
+
     setLoading(true);
     
     try {
-      // Simulación de API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      let response;
       
       if (editingConfig) {
         // Update
-        setConfigs(prev => prev.map(config => 
-          config.id === editingConfig.id 
-            ? { ...config, ...formData, updatedAt: new Date().toISOString() }
-            : config
-        ));
-        showNotification('Configuración actualizada correctamente', 'success');
+        response = await apiUpdateTelegramConfig(editingConfig.id, formData);
+        
+        if (response.success) {
+          setConfigs(prev => prev.map(config => 
+            config.id === editingConfig.id ? response.data : config
+          ));
+          showNotification('Configuración actualizada correctamente', 'success');
+        }
       } else {
         // Create
-        const newConfig = {
-          id: Date.now(),
-          ...formData,
-          isActive: true,
-          createdAt: new Date().toISOString()
-        };
-        setConfigs(prev => [...prev, newConfig]);
-        showNotification('Configuración creada correctamente', 'success');
+        response = await apiCreateTelegramConfig(formData);
+        
+        if (response.success) {
+          setConfigs(prev => [...prev, response.data]);
+          showNotification('Configuración creada correctamente', 'success');
+        }
+      }
+
+      if (response.success) {
+        resetForm();
+      } else {
+        showNotification(response.error || 'Error al guardar configuración', 'error');
       }
       
-      resetForm();
     } catch (error) {
+      console.error('Error saving config:', error);
       showNotification('Error al guardar configuración', 'error');
     } finally {
       setLoading(false);
@@ -101,7 +128,7 @@ const TelegramConfigForm = () => {
   };
 
   const handleTest = async (configId) => {
-    if (!testData.testChatId) {
+    if (!testData.testChatId.trim()) {
       showNotification('Ingresa un Chat ID para la prueba', 'warning');
       return;
     }
@@ -109,10 +136,19 @@ const TelegramConfigForm = () => {
     setTestLoading(configId);
     
     try {
-      // Simulación de API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      showNotification('Mensaje de prueba enviado correctamente', 'success');
+      const response = await apiTestTelegramConfig({
+        configId: configId,
+        testChatId: testData.testChatId.trim()
+      });
+      
+      if (response.success) {
+        showNotification('Mensaje de prueba enviado correctamente', 'success');
+        setTestData({ configId: '', testChatId: '' }); // Reset test data
+      } else {
+        showNotification(response.error || 'Error enviando mensaje de prueba', 'error');
+      }
     } catch (error) {
+      console.error('Error testing config:', error);
       showNotification('Error enviando mensaje de prueba', 'error');
     } finally {
       setTestLoading(null);
@@ -125,9 +161,16 @@ const TelegramConfigForm = () => {
     }
 
     try {
-      setConfigs(prev => prev.filter(config => config.id !== configId));
-      showNotification('Configuración eliminada correctamente', 'success');
+      const response = await apiDeleteTelegramConfig(configId);
+      
+      if (response.success) {
+        setConfigs(prev => prev.filter(config => config.id !== configId));
+        showNotification('Configuración eliminada correctamente', 'success');
+      } else {
+        showNotification(response.error || 'Error eliminando configuración', 'error');
+      }
     } catch (error) {
+      console.error('Error deleting config:', error);
       showNotification('Error eliminando configuración', 'error');
     }
   };
@@ -147,13 +190,20 @@ const TelegramConfigForm = () => {
   const startEdit = (config) => {
     setFormData({
       name: config.name,
-      botToken: '••••••••••••••••••••',
-      botUsername: config.botUsername,
-      description: config.description,
+      botToken: '••••••••••••••••••••', // No mostrar token real por seguridad
+      botUsername: config.botUsername || '',
+      description: config.description || '',
       isDefault: config.isDefault
     });
     setEditingConfig(config);
     setShowForm(true);
+  };
+
+  const handleTokenChange = (value) => {
+    // Solo actualizar si no son puntos (placeholder de seguridad)
+    if (!value.startsWith('••••')) {
+      setFormData(prev => ({ ...prev, botToken: value }));
+    }
   };
 
   return (
@@ -181,6 +231,20 @@ const TelegramConfigForm = () => {
                 <FiPlus className="h-4 w-4" />
                 Nueva Configuración
               </button>
+            </div>
+
+            {/* Info box */}
+            <div className="mt-4 p-3 bg-blue-100 rounded-lg border border-blue-200">
+              <div className="flex items-start gap-2">
+                <FiAlertCircle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-blue-800">
+                  <p className="font-medium">¿Cómo crear un bot de Telegram?</p>
+                  <p>1. Busca @BotFather en Telegram</p>
+                  <p>2. Envía /newbot y sigue las instrucciones</p>
+                  <p>3. Copia el token que te proporciona</p>
+                  <p>4. Tu Chat ID: escribe a @userinfobot para obtenerlo</p>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -223,7 +287,7 @@ const TelegramConfigForm = () => {
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Username del Bot
+                        Username del Bot (opcional)
                       </label>
                       <input
                         type="text"
@@ -239,21 +303,21 @@ const TelegramConfigForm = () => {
                         Token del Bot *
                       </label>
                       <input
-                        type="password"
+                        type="text"
                         value={formData.botToken}
-                        onChange={(e) => setFormData(prev => ({ ...prev, botToken: e.target.value }))}
+                        onChange={(e) => handleTokenChange(e.target.value)}
                         required
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
                         placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
                       />
                       <p className="text-xs text-gray-500 mt-1">
-                        Obtén el token de @BotFather en Telegram
+                        Obtén el token de @BotFather en Telegram. Formato: números:letras_y_números
                       </p>
                     </div>
 
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Descripción
+                        Descripción (opcional)
                       </label>
                       <textarea
                         value={formData.description}
@@ -310,7 +374,7 @@ const TelegramConfigForm = () => {
                 Configuraciones Existentes ({configs.length})
               </h3>
 
-              {loading && configs.length === 0 ? (
+              {fetchLoading ? (
                 <div className="text-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
                   <p className="text-gray-500 mt-2">Cargando configuraciones...</p>
@@ -368,7 +432,7 @@ const TelegramConfigForm = () => {
 
                         <div className="flex items-center gap-2">
                           <div className={`w-3 h-3 rounded-full ${
-                            config.isActive ? 'bg-green-400' : 'bg-gray-300'
+                            config.isActive ? 'bg-green-400' : 'bg-red-400'
                           }`} />
                           <span className="text-xs text-gray-500">
                             {config.isActive ? 'Activo' : 'Inactivo'}
@@ -389,12 +453,12 @@ const TelegramConfigForm = () => {
                               configId: config.id, 
                               testChatId: e.target.value 
                             })}
-                            placeholder="Chat ID o @username"
+                            placeholder="Tu Chat ID o @username"
                             className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                           />
                           <button
                             onClick={() => handleTest(config.id)}
-                            disabled={testLoading === config.id}
+                            disabled={testLoading === config.id || !config.isActive}
                             className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-1"
                           >
                             {testLoading === config.id ? (
@@ -404,6 +468,9 @@ const TelegramConfigForm = () => {
                             )}
                           </button>
                         </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Obtén tu Chat ID escribiendo a @userinfobot
+                        </p>
                       </div>
 
                       {/* Actions */}

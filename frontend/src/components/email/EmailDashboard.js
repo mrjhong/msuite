@@ -28,41 +28,42 @@ const EmailDashboard = () => {
     { id: 'test', name: 'Envío de Prueba', icon: FiSend },
   ];
 
-  const stats = [
-    { 
-      name: 'Plantillas Activas', 
-      value: '12', 
-      change: '+2', 
-      changeType: 'positive',
-      icon: FiEdit3,
-      color: 'purple'
-    },
-    { 
-      name: 'Correos Enviados', 
-      value: '1,205', 
-      change: '+18%', 
-      changeType: 'positive',
-      icon: FiSend,
-      color: 'blue'
-    },
-    { 
-      name: 'Configuraciones SMTP', 
-      value: '3', 
-      change: '0', 
-      changeType: 'neutral',
-      icon: FiSettings,
-      color: 'green'
-    },
-    { 
-      name: 'Programados', 
-      value: '8', 
-      change: '+3', 
-      changeType: 'positive',
-      icon: FiCalendar,
-      color: 'orange'
-    },
-  ];
+  // const stats = [
+  //   { 
+  //     name: 'Plantillas Activas', 
+  //     value: '12', 
+  //     change: '+2', 
+  //     changeType: 'positive',
+  //     icon: FiEdit3,
+  //     color: 'purple'
+  //   },
+  //   { 
+  //     name: 'Correos Enviados', 
+  //     value: '1,205', 
+  //     change: '+18%', 
+  //     changeType: 'positive',
+  //     icon: FiSend,
+  //     color: 'blue'
+  //   },
+  //   { 
+  //     name: 'Configuraciones SMTP', 
+  //     value: '3', 
+  //     change: '0', 
+  //     changeType: 'neutral',
+  //     icon: FiSettings,
+  //     color: 'green'
+  //   },
+  //   { 
+  //     name: 'Programados', 
+  //     value: '8', 
+  //     change: '+3', 
+  //     changeType: 'positive',
+  //     icon: FiCalendar,
+  //     color: 'orange'
+  //   },
+  // ];
 
+  const stats = []
   const renderContent = () => {
     switch (activeTab) {
       case 'templates':
@@ -169,7 +170,7 @@ const EmailDashboard = () => {
             </div>
 
             {/* Recent Activity */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            {/* <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
               <h2 className="text-xl font-bold text-gray-900 mb-4">Actividad Reciente</h2>
               <div className="space-y-4">
                 {[
@@ -198,7 +199,7 @@ const EmailDashboard = () => {
                   </div>
                 ))}
               </div>
-            </div>
+            </div> */}
           </div>
         );
     }

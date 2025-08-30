@@ -1,3 +1,4 @@
+// backend/src/models/ScheduledMessage.js
 import { DataTypes } from 'sequelize';
 import sequelize from './index.js';
 
@@ -42,6 +43,17 @@ const ScheduledMessage = sequelize.define('ScheduledMessage', {
   jobId: {
     type: DataTypes.STRING,
     allowNull: true,
+  },
+  // Nuevo campo para multimedia
+  mediaData: {
+    type: DataTypes.TEXT, // JSON como string
+    allowNull: true,
+    comment: 'Datos de multimedia en formato JSON'
+  },
+  // Nuevo campo para tipo de mensaje
+  messageType: {
+    type: DataTypes.ENUM('text', 'image', 'video', 'audio', 'document'),
+    defaultValue: 'text',
   }
 }, {
   timestamps: true,

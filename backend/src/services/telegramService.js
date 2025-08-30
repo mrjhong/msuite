@@ -1,6 +1,6 @@
 // backend/src/services/telegramService.js
 import TelegramBot from 'node-telegram-bot-api';
-import ScheduledTelegramMessage from '../models/ScheduledTelegramMessage.js';
+import { ScheduledTelegramMessage } from '../models/ScheduledTelegramMessage.js';
 import TelegramConfig from '../models/TelegramConfig.js';
 
 class TelegramManager {
@@ -31,18 +31,24 @@ class TelegramManager {
                 return this.bots.get(botKey);
             }
 
+            console.log(`🤖 Inicializando bot de Telegram: ${config.name}`);
+            
             const bot = new TelegramBot(config.botToken, { 
-                polling: {
-                    interval: 1000,
-                    autoStart: true,
-                    params: {
-                        timeout: 10
-                    }
-                }
+                polling: false // Deshabilitamos polling por defecto para evitar conflictos
             });
 
-            // Configurar eventos básicos
-            this._setupBotEvents(bot, config);
+            // Verificar que el bot sea válido
+            try {
+                const me = await bot.getMe();
+                console.log(`✅ Bot verificado: @${me.username} (${me.first_name})`);
+                
+                // Actualizar username si no estaba guardado
+                if (!config.botUsername && me.username) {
+                    await config.update({ botUsername: `@${me.username}` });
+                }
+            } catch (error) {
+                throw new Error(`Bot token inválido o bot no accesible: ${error.message}`);
+            }
 
             this.bots.set(botKey, { bot, config });
 
@@ -59,31 +65,25 @@ class TelegramManager {
         }
     }
 
-    _setupBotEvents(bot, config) {
-        bot.on('message', (msg) => {
-            console.log(`📨 Mensaje recibido en bot ${config.name}:`, msg.text);
-            // Aquí puedes agregar lógica para respuestas automáticas
-        });
-
-        bot.on('error', (error) => {
-            console.error(`❌ Error en bot ${config.name}:`, error);
-        });
-
-        bot.on('polling_error', (error) => {
-            console.error(`❌ Error de polling en bot ${config.name}:`, error);
-        });
-    }
-
     async sendMessage(chatId, message, configId = null) {
         try {
             const botKey = configId || 'default';
-            const botData = this.bots.get(botKey);
+            let botData = this.bots.get(botKey);
+
+            // Si no existe el bot, intentar inicializarlo
+            if (!botData) {
+                await this.initializeBot(configId);
+                botData = this.bots.get(botKey);
+            }
 
             if (!botData) {
                 throw new Error(`Bot no encontrado para configuración: ${botKey}`);
             }
 
-            const result = await botData.bot.sendMessage(chatId, message, {
+            // Limpiar el mensaje de caracteres no válidos
+            const cleanMessage = message.replace(/[\u{10000}-\u{10FFFF}]/gu, ''); // Remover emojis complejos si causan problemas
+
+            const result = await botData.bot.sendMessage(chatId, cleanMessage, {
                 parse_mode: 'HTML'
             });
 
@@ -92,6 +92,13 @@ class TelegramManager {
 
         } catch (error) {
             console.error(`❌ Error enviando mensaje de Telegram:`, error);
+            
+            // Manejar errores específicos de Telegram
+            if (error.code === 'ETELEGRAM') {
+                const telegramError = error.response?.body?.description || error.message;
+                throw new Error(`Error de Telegram: ${telegramError}`);
+            }
+            
             throw error;
         }
     }
@@ -99,7 +106,12 @@ class TelegramManager {
     async sendPhoto(chatId, photo, caption = '', configId = null) {
         try {
             const botKey = configId || 'default';
-            const botData = this.bots.get(botKey);
+            let botData = this.bots.get(botKey);
+
+            if (!botData) {
+                await this.initializeBot(configId);
+                botData = this.bots.get(botKey);
+            }
 
             if (!botData) {
                 throw new Error(`Bot no encontrado para configuración: ${botKey}`);
@@ -115,6 +127,12 @@ class TelegramManager {
 
         } catch (error) {
             console.error(`❌ Error enviando foto de Telegram:`, error);
+            
+            if (error.code === 'ETELEGRAM') {
+                const telegramError = error.response?.body?.description || error.message;
+                throw new Error(`Error de Telegram: ${telegramError}`);
+            }
+            
             throw error;
         }
     }
@@ -122,7 +140,12 @@ class TelegramManager {
     async sendDocument(chatId, document, caption = '', configId = null) {
         try {
             const botKey = configId || 'default';
-            const botData = this.bots.get(botKey);
+            let botData = this.bots.get(botKey);
+
+            if (!botData) {
+                await this.initializeBot(configId);
+                botData = this.bots.get(botKey);
+            }
 
             if (!botData) {
                 throw new Error(`Bot no encontrado para configuración: ${botKey}`);
@@ -138,6 +161,12 @@ class TelegramManager {
 
         } catch (error) {
             console.error(`❌ Error enviando documento de Telegram:`, error);
+            
+            if (error.code === 'ETELEGRAM') {
+                const telegramError = error.response?.body?.description || error.message;
+                throw new Error(`Error de Telegram: ${telegramError}`);
+            }
+            
             throw error;
         }
     }
@@ -145,7 +174,12 @@ class TelegramManager {
     async getChatInfo(chatId, configId = null) {
         try {
             const botKey = configId || 'default';
-            const botData = this.bots.get(botKey);
+            let botData = this.bots.get(botKey);
+
+            if (!botData) {
+                await this.initializeBot(configId);
+                botData = this.bots.get(botKey);
+            }
 
             if (!botData) {
                 throw new Error(`Bot no encontrado para configuración: ${botKey}`);
@@ -156,24 +190,12 @@ class TelegramManager {
 
         } catch (error) {
             console.error(`❌ Error obteniendo info del chat:`, error);
-            throw error;
-        }
-    }
-
-    async getChatMembers(chatId, configId = null) {
-        try {
-            const botKey = configId || 'default';
-            const botData = this.bots.get(botKey);
-
-            if (!botData) {
-                throw new Error(`Bot no encontrado para configuración: ${botKey}`);
+            
+            if (error.code === 'ETELEGRAM') {
+                const telegramError = error.response?.body?.description || error.message;
+                throw new Error(`Error de Telegram: ${telegramError}`);
             }
-
-            const count = await botData.bot.getChatMemberCount(chatId);
-            return { memberCount: count };
-
-        } catch (error) {
-            console.error(`❌ Error obteniendo miembros del chat:`, error);
+            
             throw error;
         }
     }
@@ -200,7 +222,15 @@ class TelegramManager {
         const botData = this.bots.get(botKey);
         
         if (botData) {
-            await botData.bot.stopPolling();
+            try {
+                // Detener polling si estaba habilitado
+                if (botData.bot.isPolling()) {
+                    await botData.bot.stopPolling();
+                }
+            } catch (error) {
+                console.warn('⚠️ Error deteniendo polling:', error);
+            }
+            
             this.bots.delete(botKey);
             console.log(`🛑 Bot de Telegram detenido: ${botData.config.name}`);
         }
@@ -208,7 +238,13 @@ class TelegramManager {
 
     async stopAllBots() {
         for (const [key, { bot, config }] of this.bots) {
-            await bot.stopPolling();
+            try {
+                if (bot.isPolling()) {
+                    await bot.stopPolling();
+                }
+            } catch (error) {
+                console.warn(`⚠️ Error deteniendo bot ${config.name}:`, error);
+            }
             console.log(`🛑 Bot detenido: ${config.name}`);
         }
         this.bots.clear();
@@ -258,33 +294,77 @@ export const scheduleTelegramMessage = async (userId, chatIds, message, schedule
     const scheduleJob = async (executionTime) => {
         const delay = executionTime - Date.now();
         
+        if (delay <= 0) {
+            // Ejecutar inmediatamente si la fecha ya pasó
+            console.log(`⚡ Ejecutando mensaje programado inmediatamente: ${scheduledMessage.id}`);
+            await executeScheduledMessage(scheduledMessage);
+            return;
+        }
+        
         const timeout = setTimeout(async () => {
-            try {
-                // Enviar mensajes a todos los chats
-                await Promise.allSettled(
-                    chatIds.map(chatId => sendTelegramMessage(chatId, message, configId))
-                );
-                
-                // Actualizar estado
-                await scheduledMessage.update({ status: 'sent' });
-                console.log(`✅ Mensaje programado de Telegram enviado: ${scheduledMessage.id}`);
-                
-                // Programar siguiente ejecución si es recurrente
-                if (repeat !== 'none') {
-                    const nextExecution = getNextExecution(executionTime, repeat, customDays);
-                    if (nextExecution) scheduleJob(nextExecution);
-                }
-            } catch (error) {
-                await scheduledMessage.update({ status: 'error' });
-                console.error('❌ Error enviando mensaje programado de Telegram:', error);
-            }
+            await executeScheduledMessage(scheduledMessage);
         }, delay);
+
+        // Guardar referencia del timeout (opcional, para cancelación)
+        await scheduledMessage.update({ jobId: `timeout_${timeout}` });
 
         return timeout;
     };
 
     await scheduleJob(scheduledDate.getTime());
     return scheduledMessage;
+};
+
+// Función auxiliar para ejecutar mensajes programados
+const executeScheduledMessage = async (scheduledMessage) => {
+    try {
+        console.log(`🚀 Ejecutando mensaje programado de Telegram: ${scheduledMessage.id}`);
+        
+        // Enviar mensajes a todos los chats
+        const results = await Promise.allSettled(
+            scheduledMessage.chatIds.map(chatId => 
+                sendTelegramMessage(chatId, scheduledMessage.message, scheduledMessage.configId)
+            )
+        );
+        
+        const successCount = results.filter(r => r.status === 'fulfilled').length;
+        const errorCount = results.length - successCount;
+        
+        // Actualizar estado
+        await scheduledMessage.update({ 
+            status: errorCount === 0 ? 'sent' : 'partially_sent'
+        });
+        
+        console.log(`✅ Mensaje programado de Telegram enviado: ${successCount} exitosos, ${errorCount} errores`);
+        
+        // Programar siguiente ejecución si es recurrente
+        if (scheduledMessage.repeat !== 'none') {
+            const nextExecution = getNextExecution(
+                scheduledMessage.scheduledTime.getTime(), 
+                scheduledMessage.repeat, 
+                scheduledMessage.customDays
+            );
+            
+            if (nextExecution) {
+                const newScheduled = await ScheduledTelegramMessage.create({
+                    userId: scheduledMessage.userId,
+                    chatIds: scheduledMessage.chatIds,
+                    message: scheduledMessage.message,
+                    scheduledTime: new Date(nextExecution),
+                    repeat: scheduledMessage.repeat,
+                    customDays: scheduledMessage.customDays,
+                    configId: scheduledMessage.configId,
+                    status: 'pending'
+                });
+                
+                const delay = nextExecution - Date.now();
+                setTimeout(() => executeScheduledMessage(newScheduled), delay);
+            }
+        }
+    } catch (error) {
+        await scheduledMessage.update({ status: 'error' });
+        console.error('❌ Error enviando mensaje programado de Telegram:', error);
+    }
 };
 
 export const getScheduledTelegramMessages = async (userId) => {
@@ -317,10 +397,6 @@ export const getTelegramChatInfo = async (chatId, configId = null) => {
     return await telegramManager.getChatInfo(chatId, configId);
 };
 
-export const getTelegramChatMembers = async (chatId, configId = null) => {
-    return await telegramManager.getChatMembers(chatId, configId);
-};
-
 // Helper para calcular próxima ejecución
 const getNextExecution = (lastExecution, repeat, customDays) => {
     const date = new Date(lastExecution);
@@ -345,4 +421,4 @@ const getNextExecution = (lastExecution, repeat, customDays) => {
     return date.getTime();
 };
 
-export default telegramManager;
+export default telegramManager;;

@@ -4,6 +4,28 @@ import ScheduledAction from '../models/ScheduledAction.js';
 import { cancelJob } from '../utils/jobs/scheduleWhatsapp.js';
 import { removeActionListener } from '../utils/actionListeners.js';
 import whatsappManager from './whatsappManager.js';
+import fs from 'fs';
+import path from 'path';
+import axios from 'axios';
+import { fileURLToPath } from 'url';
+import pkg from 'whatsapp-web.js';
+const { MessageMedia } = pkg;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Directorio para archivos temporales
+const TEMP_DIR = path.join(__dirname, '../../temp');
+if (!fs.existsSync(TEMP_DIR)) {
+  fs.mkdirSync(TEMP_DIR, { recursive: true });
+}
+
+// Tipos de archivo soportados
+const SUPPORTED_MEDIA_TYPES = {
+  image: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+  video: ['mp4', 'avi', 'mov', 'mkv', '3gp'],
+  audio: ['mp3', 'wav', 'ogg', 'm4a', 'aac'],
+  document: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'zip', 'rar']
+};
 
 // Inicializar el cliente único
 export const initializeWhatsAppClient = async () => {
@@ -17,7 +39,7 @@ export const initializeWhatsAppClient = async () => {
   }
 };
 
-// Obtener el cliente (ya no necesitamos userId)
+// Obtener el cliente
 export const getWhatsAppClient = () => {
   return whatsappManager.getClient();
 };
@@ -27,21 +49,142 @@ export const isWhatsAppReady = () => {
   return whatsappManager.isClientReady();
 };
 
-export const sendMessageService = async (userId, chatId, message) => {
+// Función para descargar archivos desde URL
+const downloadFile = async (url, filename) => {
+  const filePath = path.join(TEMP_DIR, filename);
+  
+  try {
+    const response = await axios({
+      method: 'GET',
+      url: url,
+      responseType: 'stream',
+      timeout: 30000 // 30 segundos timeout
+    });
+
+    const writer = fs.createWriteStream(filePath);
+    response.data.pipe(writer);
+
+    return new Promise((resolve, reject) => {
+      writer.on('finish', () => resolve(filePath));
+      writer.on('error', reject);
+    });
+  } catch (error) {
+    console.error('❌ Error descargando archivo:', error);
+    throw new Error('Error al descargar el archivo desde la URL');
+  }
+};
+
+// Función para obtener el tipo de archivo
+const getFileType = (filename) => {
+  const extension = filename.split('.').pop().toLowerCase();
+  
+  for (const [type, extensions] of Object.entries(SUPPORTED_MEDIA_TYPES)) {
+    if (extensions.includes(extension)) {
+      return type;
+    }
+  }
+  
+  return 'document'; // Por defecto como documento
+};
+
+// Función para limpiar archivos temporales
+const cleanupTempFile = (filePath) => {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log('🗑️ Archivo temporal eliminado:', filePath);
+    }
+  } catch (error) {
+    console.warn('⚠️ Error eliminando archivo temporal:', error);
+  }
+};
+
+// Enviar mensaje con soporte multimedia
+export const sendMessageService = async (userId, chatId, message, mediaData = null) => {
   try {
     if (!whatsappManager.isClientReady()) {
       throw new Error('WhatsApp client not ready');
     }
 
-    await whatsappManager.sendMessage(chatId, message);
-    console.log(`✅ Mensaje enviado a ${chatId}: ${message}`);
+    console.log('📤 Enviando mensaje a:', chatId, 'con mediaData:', mediaData);
+
+    // Si hay multimedia
+    if (mediaData) {
+      let media;
+      let tempFilePath = null;
+
+      try {
+        if (mediaData.localPath) {
+          // Archivo local subido
+          console.log('📁 Procesando archivo local:', mediaData.localPath);
+          
+          if (!fs.existsSync(mediaData.localPath)) {
+            throw new Error(`Archivo no encontrado: ${mediaData.localPath}`);
+          }
+          
+          media = MessageMedia.fromFilePath(mediaData.localPath);
+          console.log('✅ Media creado desde archivo local');
+          
+        } else if (mediaData.url) {
+          // Descargar desde URL
+          console.log('🌐 Descargando desde URL:', mediaData.url);
+          const filename = `temp_${Date.now()}_${mediaData.filename || 'file'}`;
+          tempFilePath = await downloadFile(mediaData.url, filename);
+          media = MessageMedia.fromFilePath(tempFilePath);
+          console.log('✅ Media creado desde URL descargada');
+          
+        } else if (mediaData.base64) {
+          // Crear desde base64
+          console.log('📄 Procesando base64 data');
+          media = new MessageMedia(mediaData.mimetype, mediaData.base64, mediaData.filename);
+          console.log('✅ Media creado desde base64');
+          
+        } else {
+          throw new Error('No se encontró fuente de datos multimedia válida (localPath, url, o base64)');
+        }
+
+        // Configurar opciones adicionales
+        const options = {};
+        
+        if (message && message.trim()) {
+          options.caption = message;
+        }
+
+        if (mediaData.filename) {
+          const fileType = getFileType(mediaData.filename);
+          options.sendMediaAsDocument = fileType === 'document';
+          console.log('📋 Tipo de archivo detectado:', fileType);
+        }
+
+        console.log('📨 Enviando multimedia con opciones:', options);
+        
+        // Enviar multimedia
+        const result = await whatsappManager.sendMessage(chatId, media, options);
+        console.log('✅ Multimedia enviado exitosamente a', chatId);
+        
+        return result;
+        
+      } finally {
+        // Limpiar archivo temporal si se descargó desde URL
+        if (tempFilePath) {
+          cleanupTempFile(tempFilePath);
+        }
+      }
+    } else {
+      // Enviar solo mensaje de texto
+      console.log('💬 Enviando mensaje de texto a', chatId);
+      const result = await whatsappManager.sendMessage(chatId, message);
+      console.log('✅ Mensaje de texto enviado exitosamente a', chatId);
+      return result;
+    }
   } catch (error) {
     console.error(`❌ Error al enviar mensaje a ${chatId}:`, error);
     throw new Error('Error enviando mensaje: ' + error.message);
   }
 };
 
-export const scheduleMessageService = async (userId, contacts, groups, message, scheduledTime, repeat = 'none', customDays = null) => {
+// Programar mensaje con soporte multimedia
+export const scheduleMessageService = async (userId, contacts, groups, message, scheduledTime, repeat = 'none', customDays = null, mediaData = null) => {
   if (!whatsappManager.isClientReady()) {
     throw new Error('WhatsApp client not ready');
   }
@@ -51,7 +194,7 @@ export const scheduleMessageService = async (userId, contacts, groups, message, 
     throw new Error('La fecha programada debe ser en el futuro');
   }
 
-  // Crear en base de datos
+  // Crear en base de datos (agregar campo para multimedia)
   const scheduledMessage = await ScheduledMessage.create({
     userId,
     contacts,
@@ -60,7 +203,8 @@ export const scheduleMessageService = async (userId, contacts, groups, message, 
     scheduledTime: scheduledDate,
     repeat,
     customDays,
-    status: 'pending'
+    status: 'pending',
+    mediaData: mediaData ? JSON.stringify(mediaData) : null
   });
 
   // Programar el mensaje
@@ -76,10 +220,20 @@ export const scheduleMessageService = async (userId, contacts, groups, message, 
           return;
         }
 
+        // Obtener datos multimedia si existen
+        let parsedMediaData = null;
+        if (scheduledMessage.mediaData) {
+          try {
+            parsedMediaData = JSON.parse(scheduledMessage.mediaData);
+          } catch (error) {
+            console.error('❌ Error parseando mediaData:', error);
+          }
+        }
+
         // Enviar mensajes
         const allChats = [...contacts, ...groups];
         await Promise.allSettled(
-          allChats.map(chatId => sendMessageService(userId, chatId, message))
+          allChats.map(chatId => sendMessageService(userId, chatId, message, parsedMediaData))
         );
         
         // Actualizar estado
@@ -105,6 +259,7 @@ export const scheduleMessageService = async (userId, contacts, groups, message, 
   return scheduledMessage;
 };
 
+// Obtener mensajes programados
 export const getScheduledMessagesService = async (userId) => {
   return await ScheduledMessage.findAll({
     where: { 
@@ -115,6 +270,7 @@ export const getScheduledMessagesService = async (userId) => {
   });
 };
 
+// Cancelar mensaje programado
 export const cancelScheduledMessageService = async (userId, messageId) => {
   const message = await ScheduledMessage.findOne({
     where: {
@@ -132,6 +288,7 @@ export const cancelScheduledMessageService = async (userId, messageId) => {
   return message;
 };
 
+// Funciones para acciones programadas (sin cambios)
 export const addScheduledActionService = async (trigger, contacts, groups, message) => {
   if (!whatsappManager.isClientReady()) {
     throw new Error('WhatsApp client not ready');
@@ -168,6 +325,7 @@ export const cancelScheduledActionService = async (actionId) => {
   return action;
 };
 
+// Obtener contactos y grupos
 export const getContactsAndGroups = async (userId) => {
   if (!whatsappManager.isClientReady()) {
     throw new Error('WhatsApp client not ready');
@@ -219,4 +377,43 @@ const getNextExecution = (lastExecution, repeat, customDays) => {
   }
   
   return date.getTime();
+};
+
+// Función para obtener información de multimedia de un mensaje
+export const getMediaInfoFromMessage = async (message) => {
+  try {
+    if (!message.hasMedia) {
+      return null;
+    }
+
+    const media = await message.downloadMedia();
+    
+    return {
+      mimetype: media.mimetype,
+      data: media.data,
+      filename: media.filename || `media_${Date.now()}`,
+      size: media.data ? Buffer.byteLength(media.data, 'base64') : 0
+    };
+  } catch (error) {
+    console.error('❌ Error obteniendo información de multimedia:', error);
+    return null;
+  }
+};
+
+// Función para validar archivos multimedia
+export const validateMediaFile = (filename, size) => {
+  const maxSize = 64 * 1024 * 1024; // 64MB límite de WhatsApp
+  
+  if (size > maxSize) {
+    throw new Error('El archivo es demasiado grande. Máximo 64MB permitido.');
+  }
+
+  const extension = filename.split('.').pop().toLowerCase();
+  const allSupportedExtensions = Object.values(SUPPORTED_MEDIA_TYPES).flat();
+  
+  if (!allSupportedExtensions.includes(extension)) {
+    throw new Error(`Tipo de archivo no soportado: .${extension}`);
+  }
+
+  return true;
 };

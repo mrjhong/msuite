@@ -214,11 +214,18 @@ class WhatsAppManager {
     }
 
     // Métodos de conveniencia
-    async sendMessage(chatId, message) {
+    async sendMessage(chatId, message, options) {
         if (!this.isClientReady()) {
             throw new Error('Cliente WhatsApp no está listo');
         }
-        return await this.client.sendMessage(chatId, message);
+        return await this.client.sendMessage(chatId, message, options? options : {} );
+    }
+
+    async sendMedia(chatId, media) {
+        if (!this.isClientReady()) {
+            throw new Error('Cliente WhatsApp no está listo');
+        }
+        return await this.client.sendMessage(chatId, media);
     }
 
     async getChats() {

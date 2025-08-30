@@ -15,6 +15,7 @@ import User from './src/models/User.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import telegramRoutes from './src/routes/telegramRoutes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,6 +46,7 @@ app.use('/api/setup', setupRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/whatsapp', messageRoutes);
 app.use('/api/email', emailRoutes); 
+app.use('/api/telegram', telegramRoutes);
 
 app.get('/', async (req, res) => {
   try {

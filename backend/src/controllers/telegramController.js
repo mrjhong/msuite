@@ -18,6 +18,22 @@ export const createTelegramConfig = async (req, res) => {
     try {
         const { name, botToken, botUsername, description, isDefault } = req.body;
         
+        // Validaciones
+        if (!name || !botToken) {
+            return res.status(400).json({
+                success: false,
+                error: 'Nombre y token del bot son obligatorios'
+            });
+        }
+
+        // Validar formato del token
+        if (!botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Formato de token inválido. Debe ser: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz'
+            });
+        }
+        
         // Si es configuración por defecto, desactivar otras
         if (isDefault) {
             await TelegramConfig.update(
@@ -29,21 +45,24 @@ export const createTelegramConfig = async (req, res) => {
         const config = await TelegramConfig.create({
             name,
             botToken,
-            botUsername,
-            description,
-            isDefault,
+            botUsername: botUsername || null,
+            description: description || null,
+            isDefault: !!isDefault,
             userId: req.user.userId
         });
 
-        // Inicializar bot si es la configuración por defecto
-        if (isDefault) {
-            try {
-                await initializeTelegramBot(config.id);
-            } catch (error) {
-                console.error('Error inicializando bot:', error);
-                // No fallar la creación, pero marcar como inactivo
-                await config.update({ isActive: false });
-            }
+        // Intentar inicializar el bot para validar el token
+        try {
+            await initializeTelegramBot(config.id);
+            await config.update({ isActive: true });
+            console.log(`✅ Bot de Telegram configurado: ${name}`);
+        } catch (error) {
+            console.error('❌ Error inicializando bot:', error);
+            await config.update({ isActive: false });
+            return res.status(400).json({
+                success: false,
+                error: 'Token de bot inválido o bot no accesible'
+            });
         }
 
         res.status(201).json({
@@ -111,13 +130,43 @@ export const updateTelegramConfig = async (req, res) => {
             );
         }
 
+        // Si se cambió el token, reinicializar el bot
+        let botNeedsRestart = false;
+        if (botToken && botToken !== config.botToken) {
+            botNeedsRestart = true;
+            
+            // Validar nuevo token
+            if (!botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Formato de token inválido'
+                });
+            }
+        }
+
         await config.update({
-            name,
-            botToken,
-            botUsername,
-            description,
-            isDefault
+            name: name || config.name,
+            botToken: botToken || config.botToken,
+            botUsername: botUsername !== undefined ? botUsername : config.botUsername,
+            description: description !== undefined ? description : config.description,
+            isDefault: isDefault !== undefined ? isDefault : config.isDefault
         });
+
+        if (botNeedsRestart) {
+            try {
+                // Detener bot anterior
+                await telegramManager.stopBot(id);
+                // Inicializar con nuevo token
+                await initializeTelegramBot(id);
+                await config.update({ isActive: true });
+            } catch (error) {
+                await config.update({ isActive: false });
+                return res.status(400).json({
+                    success: false,
+                    error: 'Nuevo token inválido o bot no accesible'
+                });
+            }
+        }
 
         res.json({
             success: true,
@@ -188,6 +237,20 @@ export const sendTelegramMessageNow = async (req, res) => {
             });
         }
 
+        if (!message && messageType === 'text') {
+            return res.status(400).json({
+                success: false,
+                error: 'El mensaje no puede estar vacío'
+            });
+        }
+
+        if ((messageType === 'photo' || messageType === 'document') && !mediaUrl) {
+            return res.status(400).json({
+                success: false,
+                error: 'Debe especificar una URL de archivo para mensajes multimedia'
+            });
+        }
+
         const results = [];
 
         for (const chatId of chatIds) {
@@ -219,16 +282,19 @@ export const sendTelegramMessageNow = async (req, res) => {
             }
         }
 
+        const successCount = results.filter(r => r.success).length;
+        const errorCount = results.length - successCount;
+
         res.json({
             success: true,
-            message: 'Mensajes procesados',
+            message: `${successCount} mensajes enviados${errorCount > 0 ? `, ${errorCount} fallaron` : ''}`,
             results
         });
     } catch (error) {
         console.error('Error sending Telegram message:', error);
         res.status(500).json({
             success: false,
-            error: 'Error enviando mensaje de Telegram'
+            error: 'Error enviando mensaje de Telegram: ' + error.message
         });
     }
 };
@@ -248,12 +314,34 @@ export const scheduleTelegramMessageController = async (req, res) => {
             configId
         } = req.body;
 
+        if (!chatIds || chatIds.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Debe especificar al menos un chat'
+            });
+        }
+
+        if (!message && messageType === 'text') {
+            return res.status(400).json({
+                success: false,
+                error: 'El mensaje no puede estar vacío'
+            });
+        }
+
+        const scheduledDate = new Date(scheduledTime);
+        if (scheduledDate <= new Date()) {
+            return res.status(400).json({
+                success: false,
+                error: 'La fecha programada debe ser en el futuro'
+            });
+        }
+
         const scheduled = await scheduleTelegramMessage(
             userId,
             chatIds,
             message,
-            new Date(scheduledTime),
-            repeat,
+            scheduledDate,
+            repeat || 'none',
             customDays,
             configId
         );
@@ -346,7 +434,7 @@ export const testTelegramConfig = async (req, res) => {
 
         const testMessage = `🤖 Mensaje de prueba de configuración\n\n` +
                            `Fecha: ${new Date().toLocaleString()}\n` +
-                           `Sistema: Telegram Mass`;
+                           `Sistema: MSuite Telegram`;
 
         await sendTelegramMessage(testChatId, testMessage, configId);
 
