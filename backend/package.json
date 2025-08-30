@@ -33,6 +33,6 @@
     "sanitize-html": "^2.16.0",
     "sequelize": "^6.37.5",
     "socket.io": "^4.8.1",
-    "whatsapp-web.js": "^1.26.0"
+    "whatsapp-web.js": "^1.33.0"
   }
 }

@@ -1,5 +1,6 @@
 // backend/src/services/whatsappManager.js
 import pkg from 'whatsapp-web.js';
+import { broadcastToAllSockets } from '../sockets/whatsappSocket.js';
 
 const { Client, LocalAuth } = pkg;
 
@@ -103,7 +104,8 @@ class WhatsAppManager {
     _setupBasicListeners() {
         this.client.on('qr', (qr) => {
             this.isReady = false;
-            console.log('📱 QR Code generado');
+            console.log('📱 QR Code generado 1');
+            broadcastToAllSockets('qr', qr);
             this._notifyListeners('qr', qr);
         });
 

@@ -63,6 +63,7 @@ export const initializeSocket = (server) => {
         }
       } catch (error) {
         console.error('❌ Error en initializeWhatsApp:', error);
+        // eliminar las carpetas de sesión para forzar nuevo inicio
         socket.emit('error', { message: 'Error al inicializar WhatsApp' });
       }
     });
@@ -154,7 +155,7 @@ const setupWhatsAppGlobalListeners = () => {
 };
 
 // Función para enviar mensajes a todos los sockets conectados
-const broadcastToAllSockets = (event, data = null) => {
+export const broadcastToAllSockets = (event, data = null) => {
   connectedSockets.forEach(({ socket }) => {
     try {
       socket.emit(event, data);

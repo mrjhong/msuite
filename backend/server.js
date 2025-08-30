@@ -39,7 +39,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Rutas de setup (ANTES que las rutas protegidas)
-app.use('/setup', setupRoutes);
+app.use('/api/setup', setupRoutes);
 
 // Rutas principales
 app.use('/api/auth', authRoutes);
@@ -51,7 +51,7 @@ app.get('/', async (req, res) => {
     const userCount = await User.count();
     
     if (userCount === 0) {
-      return res.redirect('/setup');
+      return res.redirect('/api/setup');
     }
     
     // Retornar información del estado del sistema
