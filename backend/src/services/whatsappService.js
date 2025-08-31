@@ -184,7 +184,7 @@ export const sendMessageService = async (userId, chatId, message, mediaData = nu
 };
 
 // Programar mensaje con soporte multimedia
-export const scheduleMessageService = async (userId, contacts, groups, message, scheduledTime, repeat = 'none', customDays = null, mediaData = null) => {
+export const scheduleMessageService = async (userId, contacts, groups, message, scheduledTime, repeat = 'none', customDays = null, mediaData ) => {
   if (!whatsappManager.isClientReady()) {
     throw new Error('WhatsApp client not ready');
   }
@@ -416,4 +416,88 @@ export const validateMediaFile = (filename, size) => {
   }
 
   return true;
+};
+
+// Agregar estas funciones a whatsappService.js
+
+// Función para limpiar archivos programados expirados
+export const cleanupExpiredScheduledFiles = async () => {
+  try {
+    const scheduledDir = path.join(process.cwd(), 'scheduled_media');
+    if (!fs.existsSync(scheduledDir)) return;
+
+    // Obtener mensajes programados cancelados o enviados hace más de 24 horas
+    const expiredMessages = await ScheduledMessage.findAll({
+      where: {
+        status: ['sent', 'cancelled', 'error'],
+        updatedAt: {
+          [Op.lt]: new Date(Date.now() - 24 * 60 * 60 * 1000) // 24 horas atrás
+        }
+      }
+    });
+
+    for (const message of expiredMessages) {
+      if (message.mediaData) {
+        try {
+          const mediaData = JSON.parse(message.mediaData);
+          if (mediaData.localPath && mediaData.isScheduled && fs.existsSync(mediaData.localPath)) {
+            fs.unlinkSync(mediaData.localPath);
+            console.log('🗑️ Archivo programado expirado eliminado:', mediaData.localPath);
+          }
+        } catch (error) {
+          console.warn('⚠️ Error limpiando archivo expirado:', error);
+        }
+      }
+    }
+
+    // Eliminar registros de base de datos de mensajes muy antiguos
+    await ScheduledMessage.destroy({
+      where: {
+        status: ['sent', 'cancelled', 'error'],
+        updatedAt: {
+          [Op.lt]: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // 7 días atrás
+        }
+      }
+    });
+
+    console.log('✅ Limpieza de archivos programados completada');
+  } catch (error) {
+    console.error('❌ Error en limpieza de archivos programados:', error);
+  }
+};
+
+// Programar limpieza automática cada 6 horas
+setInterval(cleanupExpiredScheduledFiles, 6 * 60 * 60 * 1000);
+
+// Función mejorada para cancelar mensaje programado
+export const cancelScheduledMessageServiceImproved = async (userId, messageId) => {
+  const message = await ScheduledMessage.findOne({
+    where: {
+      id: messageId,
+      userId
+    }
+  });
+
+  if (!message) {
+    throw new Error('Mensaje no encontrado');
+  }
+
+  // Cancelar job programado
+  cancelJob(messageId);
+  
+  // Limpiar archivo si existe
+  if (message.mediaData) {
+    try {
+      const mediaData = JSON.parse(message.mediaData);
+      if (mediaData.localPath && mediaData.isScheduled && fs.existsSync(mediaData.localPath)) {
+        fs.unlinkSync(mediaData.localPath);
+        console.log('🗑️ Archivo programado eliminado al cancelar:', mediaData.localPath);
+      }
+    } catch (error) {
+      console.warn('⚠️ Error limpiando archivo al cancelar:', error);
+    }
+  }
+  
+  await message.update({ status: 'cancelled' });
+  return message;
 };

@@ -141,6 +141,96 @@ export const sendMessageWithFile = async (req, res) => {
   }
 };
 
+
+export const scheduleMessageWithFile = async (req, res) => {
+  const { userId } = req.user;
+  
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No se subió ningún archivo' });
+    }
+
+    // Parsear los datos del formulario
+    const contacts = req.body.contacts ? JSON.parse(req.body.contacts) : [];
+    const groups = req.body.groups ? JSON.parse(req.body.groups) : [];
+    const message = req.body.message || '';
+    const scheduledTime = req.body.scheduledTime;
+    const repeat = req.body.repeat || 'none';
+    const customDays = req.body.customDays || null;
+
+    console.log('📁 Archivo recibido para programación:', {
+      filename: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      path: req.file.path,
+      scheduledTime
+    });
+
+    // Validar fecha programada
+    const scheduledDate = new Date(scheduledTime);
+    if (scheduledDate < new Date()) {
+      // Limpiar archivo si la fecha es inválida
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ 
+        success: false, 
+        error: 'La fecha programada debe ser en el futuro' 
+      });
+    }
+
+    // Crear una copia permanente del archivo para el mensaje programado
+    const permanentDir = path.join(process.cwd(), 'scheduled_media');
+    if (!fs.existsSync(permanentDir)) {
+      fs.mkdirSync(permanentDir, { recursive: true });
+    }
+
+    const permanentFileName = `scheduled_${Date.now()}_${req.file.originalname}`;
+    const permanentPath = path.join(permanentDir, permanentFileName);
+    
+    // Copiar archivo a directorio permanente
+    fs.copyFileSync(req.file.path, permanentPath);
+    
+    // Limpiar archivo temporal original
+    fs.unlinkSync(req.file.path);
+
+    // Preparar datos de multimedia con la ruta permanente
+    const mediaData = {
+      filename: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      localPath: permanentPath, // Usar ruta permanente
+      isScheduled: true // Marcar como archivo programado
+    };
+
+    // Programar el mensaje
+    const scheduled = await scheduleMessageService(
+      userId,
+      contacts,
+      groups,
+      message,
+      scheduledDate,
+      repeat,
+      customDays,
+      mediaData
+    );
+
+    res.json({
+      success: true,
+      message: 'Mensaje con archivo programado correctamente',
+      scheduled
+    });
+  } catch (error) {
+    console.error('Error en scheduleMessageWithFile:', error);
+    
+    // Limpiar archivo en caso de error
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+      console.log('🗑️ Archivo temporal eliminado por error:', req.file.path);
+    }
+    
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 export const scheduleMessage = async (req, res) => {
   const { userId } = req.user;
   const { contacts, groups, message, scheduledTime, repeat, customDays, mediaData } = req.body;
@@ -299,3 +389,5 @@ export const getContacts = async (req, res) => {
 
 // Middleware para subida de archivos
 export const uploadMiddleware = upload.single('media');
+// Middleware para subida de archivos en mensajes programados
+export const uploadScheduleMiddleware = upload.single('media');

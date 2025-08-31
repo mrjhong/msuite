@@ -11,7 +11,9 @@ import {
     getScheduledActions,
     cancelScheduledAction,
     getChatHistory,
-    uploadMiddleware
+    uploadMiddleware,
+    scheduleMessageWithFile,
+    uploadScheduleMiddleware
 } from '../controllers/whatsappController.js';
 import { authMiddleware } from '../middleware/authMiddleware.js';
 
@@ -24,7 +26,7 @@ router.post('/send-now', authMiddleware, sendMessageNow);
 router.post('/send-with-file', authMiddleware, uploadMiddleware, sendMessageWithFile);
 
 // Mensajes programados
-router.post('/schedule/messages', authMiddleware, scheduleMessage);
+router.post('/schedule/messages', authMiddleware,uploadScheduleMiddleware,  scheduleMessageWithFile);
 router.get('/schedule/messages', authMiddleware, getScheduledMessages);
 router.delete('/schedule/messages/:id', authMiddleware, cancelScheduledMessage);
 

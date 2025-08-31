@@ -13,6 +13,7 @@
     "axios": "^1.7.9",
     "dompurify": "^3.2.5",
     "framer-motion": "^12.7.4",
+    "moment": "^2.30.1",
     "postcss": "^8.5.2",
     "prismjs": "^1.30.0",
     "qrcode.react": "^4.2.0",

@@ -1,7 +1,7 @@
 // frontend/src/components/whatsapp/ScheduleMessage.js
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ContactList from './ContactList';
-import { apiCancelScheduledMessage, apiGetScheduledMessages, apiScheduleMessage } from '../../services/whatsappApiService';
+import { apiCancelScheduledMessage, apiGetScheduledMessages, apiScheduleMessage, apiScheduleMessageWithFile } from '../../services/whatsappApiService';
 import { useGlobalContext } from '../../context/GlobalContext';
 import DatePicker from 'react-datepicker';
 import { 
@@ -20,7 +20,10 @@ import {
 const ScheduleMessage = () => {
   const { selectedContacts, selectedGroups, showNotification } = useGlobalContext();
   const [message, setMessage] = useState('');
-  const [scheduledTime, setScheduledTime] = useState(new Date());
+  const [scheduledTime, setScheduledTime] = useState(() => {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() + 2);
+  return now;});
   const [repeat, setRepeat] = useState('none');
   const [customDays, setCustomDays] = useState(1);
   const [scheduledMessages, setScheduledMessages] = useState([]);
@@ -31,6 +34,15 @@ const ScheduleMessage = () => {
   const [filePreview, setFilePreview] = useState(null);
   const [error, setError] = useState(false);
   const fileInputRef = useRef(null);
+
+   // Tipos de archivo soportados
+  const supportedTypes = {
+    image: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+    video: ['mp4', 'avi', 'mov', 'mkv', '3gp'],
+    audio: ['mp3', 'wav', 'ogg', 'm4a', 'aac'],
+    document: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'zip', 'rar']
+  };
+
 
   const stableShowNotification = useCallback((message, type) => {
     if (error === false) {
@@ -106,37 +118,29 @@ const ScheduleMessage = () => {
 
     try {
       let mediaData = null;
-
+      let response;
       if (sendMethod === 'url' && mediaUrl.trim()) {
         mediaData = {
           url: mediaUrl.trim(),
           filename: mediaUrl.split('/').pop() || 'media_file'
         };
+        response = await apiScheduleMessage(formData);
       } else if (sendMethod === 'file' && selectedFile) {
         // Convertir archivo a base64 para almacenamiento
-        const base64 = await new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result.split(',')[1]);
-          reader.readAsDataURL(selectedFile);
-        });
-
-        mediaData = {
-          base64: base64,
-          mimetype: selectedFile.type,
-          filename: selectedFile.name,
-          size: selectedFile.size
-        };
+        const formData = new FormData();
+        formData.append('media', selectedFile);
+        formData.append('message', message);
+        formData.append('scheduledTime', scheduledTime.toISOString());
+        formData.append('repeat', repeat);
+        if (repeat === 'custom') {
+          formData.append('customDays', customDays);
+        }
+        formData.append('contacts', JSON.stringify(selectedContacts));
+        formData.append('groups', JSON.stringify(selectedGroups));
+        response = await apiScheduleMessageWithFile(formData);
       }
 
-      const response = await apiScheduleMessage({
-        contacts: selectedContacts,
-        groups: selectedGroups,
-        message,
-        scheduledTime,
-        repeat,
-        customDays: repeat === 'custom' ? customDays : null,
-        mediaData
-      });
+      
 
       if (response.success === false) {
         showNotification('Error al programar el mensaje', 'error');
@@ -390,7 +394,7 @@ const ScheduleMessage = () => {
                   className="px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   popperClassName="z-50"
                   popperPlacement="auto"
-                  minDate={new Date()}
+                  minDate={new Date()} // No permitir fechas pasadas}
                   required
                   locale="es"
                   timeCaption="Hora"
