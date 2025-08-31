@@ -124,7 +124,7 @@ const ScheduleMessage = () => {
           url: mediaUrl.trim(),
           filename: mediaUrl.split('/').pop() || 'media_file'
         };
-        response = await apiScheduleMessage(formData);
+        response = await apiScheduleMessage(mediaData);
       } else if (sendMethod === 'file' && selectedFile) {
         // Convertir archivo a base64 para almacenamiento
         const formData = new FormData();
